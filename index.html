@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>文件上传工具</title>
+    <meta charset="UTF-8">
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 30px;
+        }
+
+        .drop-zone {
+            border: 2px dashed #cbd5e0;
+            border-radius: 8px;
+            padding: 40px 20px;
+            text-align: center;
+            margin: 20px 0;
+            cursor: pointer;
+            background-color: white;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .drop-zone:hover {
+            border-color: #4a90e2;
+            background-color: #f8faff;
+        }
+
+        .result {
+            margin: 12px 0;
+            padding: 15px;
+            background-color: white;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            transition: transform 0.2s ease;
+        }
+
+        .result:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.08);
+        }
+
+        .success {
+            color: #2f855a;
+            border-left: 4px solid #48bb78;
+        }
+
+        .error {
+            color: #c53030;
+            border-left: 4px solid #f56565;
+        }
+
+        .copy-btn {
+            padding: 6px 14px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            background: white;
+            cursor: pointer;
+            min-width: 90px;
+            font-size: 0.9em;
+            color: #4a5568;
+            transition: all 0.2s ease;
+        }
+
+        .copy-btn:hover:not(:disabled) {
+            background: #f7fafc;
+            border-color: #cbd5e0;
+        }
+
+        .copy-btn:disabled {
+            opacity: 0.6;
+            cursor: default;
+        }
+
+        .result > div {
+            display: flex;
+            gap: 10px;
+        }
+
+        .uploading {
+            color: #4a90e2;
+            font-style: italic;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.6; }
+            100% { opacity: 1; }
+        }
+
+        .file-name {
+            font-weight: 500;
+        }
+
+        .file-size {
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <h1>文件上传工具</h1>
+    <p class="subtitle">支持拖放上传，单个文件限制 100MB</p>
+    
+    <div class="drop-zone" id="dropZone">
+        <div>拖放文件到这里或点击选择文件</div>
+        <input type="file" id="fileInput" multiple style="display: none;">
+    </div>
+    
+    <div id="results"></div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const results = document.getElementById('results');
+        const uploadingFiles = new Set();
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        class FileUploader {
+            constructor() {
+                this.baseUrl = 'https://hephelp.udesk.cn/spa1/file_upload_policy';
+            }
+
+            isVideo(file) {
+                return file.type.startsWith('video/') || 
+                       file.name.match(/\.(mp4|avi|mov|wmv|flv|mkv)$/i);
+            }
+
+            isAudio(file) {
+                return file.type.startsWith('audio/') || 
+                       file.name.match(/\.(mp3|wav|ogg|m4a|aac)$/i);
+            }
+
+            getBBCode(file, url) {
+                if (this.isVideo(file)) {
+                    return `[movie]${url}[/movie]`;
+                }
+                if (this.isAudio(file)) {
+                    return `[audio]${url}[/audio]`;
+                }
+                return url;
+            }
+
+            async getUploadPolicy(filename) {
+                const timestamp = Date.now();
+                const params = new URLSearchParams({
+                    'marking': 'client.chat_upload',
+                    'key': filename,
+                    '_ck': `${timestamp}_nspslg`,
+                    'access_token': 'any-token',
+                    'user_id': '12345'
+                });
+
+                const headers = {
+                    'accept': '*/*',
+                    'accept-language': 'zh-CN,zh;q=0.9',
+                    'x-requested-with': 'XMLHttpRequest',
+                    'x-csrf-token': 'ZmI5YTRlZjc2M2NhMzFjNWI3NTNmNmM4MjE1ZWE1MWY=',
+                    'udesk-timezone': 'Asia/Shanghai'
+                };
+
+                try {
+                    const response = await fetch(`${this.baseUrl}?${params}`, { headers });
+                    const data = await response.json();
+                    
+                    if (data.code !== 1000) {
+                        throw new Error('获取上传策略失败');
+                    }
+                    
+                    return data;
+                } catch (error) {
+                    throw new Error('网络错��，请重试');
+                }
+            }
+
+            async upload(file) {
+                if (file.size > 100 * 1024 * 1024) {
+                    throw new Error('文件大小超过100MB限制');
+                }
+
+                const policy = await this.getUploadPolicy(file.name);
+
+                const formData = new FormData();
+                formData.append('OSSAccessKeyId', policy.accessid);
+                formData.append('policy', policy.policy);
+                formData.append('Signature', policy.signature);
+                formData.append('key', policy.key);
+                formData.append('x-oss-object-acl', policy['x-oss-object-acl']);
+                formData.append('file', file);
+
+                try {
+                    const response = await fetch(policy.host, {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (response.status !== 204) {
+                        throw new Error(response.status === 413 ? '文件太大' : '上传失败');
+                    }
+
+                    return policy.signed_url;
+                } catch (error) {
+                    throw new Error(error.message || '网络错误，请重试');
+                }
+            }
+        }
+
+        async function uploadFile(file) {
+            if (uploadingFiles.has(file.name)) return;
+            uploadingFiles.add(file.name);
+
+            const div = document.createElement('div');
+            div.className = 'result';
+            div.textContent = `${file.name} (${formatFileSize(file.size)}): 上传中...`;
+            results.insertBefore(div, results.firstChild);
+
+            try {
+                const uploader = new FileUploader();
+                const url = await uploader.upload(file);
+                div.className = 'result success';
+
+                const bbCode = uploader.getBBCode(file, url);
+                const showBBCode = uploader.isVideo(file) || uploader.isAudio(file);
+
+                div.innerHTML = `
+                    <div>
+                        <span class="file-name">${file.name}</span>
+                        <span class="file-size">(${formatFileSize(file.size)})</span>
+                    </div>
+                    <div>
+                        <button class="copy-btn" onclick="this.disabled=true; navigator.clipboard.writeText('${url}').then(() => {
+                            this.textContent='已复制';
+                            setTimeout(() => {
+                                this.textContent='复制链接';
+                                this.disabled=false;
+                            }, 1000);
+                        })">复制链接</button>
+                        ${showBBCode ? `
+                        <button class="copy-btn" onclick="this.disabled=true; navigator.clipboard.writeText('${bbCode}').then(() => {
+                            this.textContent='已复制';
+                            setTimeout(() => {
+                                this.textContent='复制BBCode';
+                                this.disabled=false;
+                            }, 1000);
+                        })">复制BBCode</button>
+                        ` : ''}
+                    </div>
+                `;
+            } catch (error) {
+                div.className = 'result error';
+                div.textContent = `${file.name} (${formatFileSize(file.size)}): ${error.message}`;
+            } finally {
+                uploadingFiles.delete(file.name);
+            }
+        }
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        
+        fileInput.addEventListener('change', (e) => {
+            Array.from(e.target.files).forEach(uploadFile);
+            fileInput.value = '';
+        });
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#666';
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.style.borderColor = '#ccc';
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#ccc';
+            Array.from(e.dataTransfer.files).forEach(uploadFile);
+        });
+    </script>
+</body>
+</html> 
